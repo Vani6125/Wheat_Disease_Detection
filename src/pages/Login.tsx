@@ -4,10 +4,12 @@ import { Wheat, CheckCircle, Info, Menu, X } from "lucide-react";
 import farmerTech from "@/assets/farmer-tech-illustration.png";
 import farmerField from "@/assets/farmer-field.jpg";
 import { Home, Phone } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 
 const Login = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [language, setLanguage] = useState("en");
+  const [showPin, setShowPin] = useState(false);
 
   const t = {
     en: {
@@ -288,20 +290,29 @@ const Login = () => {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-primary mb-2">
-                        {text.pin}
-                      </label>
-                      <input
-                        type="password"
-                        value={pin}
-                        onChange={(e) => setPin(e.target.value)}
-                        placeholder={text.pinPlaceholder}
-                        maxLength={6}
-                        className="w-full px-4 py-3 rounded-lg border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary"
-                        required
-                      />
-                    </div>
-
+  <label className="block text-sm font-medium text-primary mb-2">
+    {text.pin}
+  </label>
+  <div className="relative">
+    <input
+      type={showPin ? "text" : "password"}
+      value={pin}
+      onChange={(e) => setPin(e.target.value)}
+      placeholder={text.pinPlaceholder}
+      maxLength={6}
+      className="w-full px-4 py-3 pr-11 rounded-lg border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+      required
+    />
+    <button
+      type="button"
+      onClick={() => setShowPin((prev) => !prev)}
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
+      aria-label={showPin ? "Hide PIN" : "Show PIN"}
+    >
+      {showPin ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+    </button>
+  </div>
+</div>
                     <button
                       type="submit"
                       disabled={isLoading}
