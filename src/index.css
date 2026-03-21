@@ -1,0 +1,107 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Open+Sans:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 120 20% 97%;
+    --foreground: 120 30% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 120 30% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 120 30% 10%;
+
+    --primary: 120 40% 30%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 120 30% 92%;
+    --secondary-foreground: 120 40% 25%;
+
+    --muted: 120 15% 94%;
+    --muted-foreground: 120 10% 40%;
+
+    --accent: 45 100% 50%;
+    --accent-foreground: 120 40% 15%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 120 50% 40%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 35 100% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 120 20% 85%;
+    --input: 120 20% 90%;
+    --ring: 120 40% 30%;
+
+    --radius: 0.75rem;
+
+    /* Custom AgriLens colors */
+    --agri-green-dark: 120 45% 25%;
+    --agri-green: 120 40% 35%;
+    --agri-green-light: 120 35% 85%;
+    --agri-yellow: 45 100% 50%;
+    --agri-amber: 35 95% 55%;
+    --agri-orange: 25 100% 55%;
+    --agri-mint: 120 40% 95%;
+
+    /* Gradients */
+    --gradient-header: linear-gradient(90deg, hsl(45, 100%, 50%) 0%, hsl(35, 100%, 55%) 50%, hsl(120, 40%, 35%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(45, 100%, 50%) 0%, hsl(35, 100%, 55%) 100%);
+    --gradient-success: linear-gradient(135deg, hsl(120, 50%, 40%) 0%, hsl(120, 40%, 50%) 100%);
+    --gradient-danger: linear-gradient(135deg, hsl(0, 70%, 50%) 0%, hsl(0, 60%, 60%) 100%);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Open Sans', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', sans-serif;
+  }
+}
+
+@layer components {
+  .gradient-header {
+    background: linear-gradient(90deg, hsl(45, 100%, 50%) 0%, hsl(35, 100%, 55%) 50%, hsl(120, 40%, 35%) 100%);
+  }
+
+  .gradient-hero {
+    background: linear-gradient(135deg, hsl(45, 100%, 50%) 0%, hsl(35, 100%, 55%) 100%);
+  }
+
+  .card-feature {
+    @apply bg-card rounded-xl p-6 shadow-md border border-border hover:shadow-lg transition-shadow duration-300;
+  }
+
+  .metric-circle {
+    @apply rounded-full flex flex-col items-center justify-center font-semibold;
+  }
+
+  .metric-circle-success {
+    @apply border-4 border-success bg-secondary;
+  }
+
+  .metric-circle-danger {
+    @apply border-4 border-destructive bg-red-50;
+  }
+
+  .section-title {
+    @apply text-2xl md:text-3xl font-bold text-primary font-heading;
+  }
+
+  .btn-submit {
+    @apply bg-primary text-primary-foreground px-8 py-3 rounded-lg font-semibold hover:opacity-90 transition-opacity;
+  }
+}

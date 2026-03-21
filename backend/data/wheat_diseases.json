@@ -1,0 +1,30 @@
+{
+  "Aphid": {
+    "type": "Insect Pest",
+    "cause": "Aphid infestation feeding on plant sap",
+    "severity": "7",
+    "symptoms": ["Yellowing leaves", "Stunted growth", "Honeydew secretion", "Sooty mold"],
+    "precautions": ["Regular monitoring", "Use of reflective mulch", "Avoid excess nitrogen"],
+    "prevention": ["Early planting", "Use of resistant varieties", "Natural predators", "Crop rotation"],
+    "remedies": ["Neem oil spray", "Insecticidal soap", "Imidacloprid", "Pyrethrin"]
+  },
+  "Black Rust": {
+    "type": "Fungal Disease",
+    "cause": "Puccinia graminis fungus",
+    "severity": "9",
+    "symptoms": ["Black pustules on stems", "Leaf yellowing", "Reduced grain fill", "Stem breakage"],
+    "precautions": ["Destroy infected residues", "Avoid late sowing", "Monitor regularly"],
+    "prevention": ["Resistant varieties", "Proper spacing", "Balanced fertilization", "Timely sowing"],
+    "remedies": ["Tebuconazole", "Propiconazole", "Triazole fungicides", "Sulfur dusting"]
+  },
+  "Healthy": {
+    "type": "Healthy Plant",
+    "cause": "Proper growing conditions",
+    "severity": "0",
+    "symptoms": ["Green leaves", "Strong stems", "Normal growth", "Good grain development"],
+    "precautions": ["Continue good practices", "Regular monitoring", "Soil testing"],
+    "prevention": ["Crop rotation", "Balanced fertilization", "Proper irrigation", "Weed control"],
+    "remedies": ["Maintain current practices", "Preventive fungicides if needed", "Regular scouting"],
+    "message": "Your wheat crop appears healthy! Maintain good agricultural practices."
+  }
+}
