@@ -2,7 +2,19 @@ import os
 import io
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# -------------------- TF MEMORY OPTIMIZATIONS (must be before tf import) --------------------
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['TF_NUM_INTRAOP_THREADS'] = '1'
+os.environ['TF_NUM_INTEROP_THREADS'] = '1'
+
 import tensorflow as tf
+
+# Limit TF thread usage to reduce RAM on single-core free tier
+tf.config.threading.set_intra_op_parallelism_threads(1)
+tf.config.threading.set_inter_op_parallelism_threads(1)
+
 import numpy as np
 from PIL import Image
 from flask_sqlalchemy import SQLAlchemy
@@ -81,22 +93,36 @@ with app.app_context():
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "trained_model_efficientnet_b0.h5")
 
-# -------------------- LOAD MODEL --------------------
-try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    print("Model loaded successfully")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+# -------------------- LAZY MODEL LOADING --------------------
+# Models are NOT loaded at startup to prevent OOM segfault on 1GB RAM instances.
+# They are loaded on first use and cached globally.
+_model = None
+_fertilizer_model = None
 
-FERTILIZER_MODEL_PATH = os.path.join(BASE_DIR, "fertilizer_recommendation_model.pkl")
-fertilizer_model = None
-try:
-    with open(FERTILIZER_MODEL_PATH, "rb") as f:
-        fertilizer_model = pickle.load(f)
-    print("✅ Fertilizer model loaded successfully")
-except Exception as e:
-    print(f"❌ Error loading fertilizer model: {e}")
+def get_model():
+    global _model
+    if _model is None:
+        try:
+            print("Loading TF model...")
+            _model = tf.keras.models.load_model(MODEL_PATH)
+            print("✅ Model loaded successfully")
+        except Exception as e:
+            print(f"❌ Error loading model: {e}")
+            _model = None
+    return _model
+
+def get_fertilizer_model():
+    global _fertilizer_model
+    if _fertilizer_model is None:
+        fertilizer_model_path = os.path.join(BASE_DIR, "fertilizer_recommendation_model.pkl")
+        try:
+            with open(fertilizer_model_path, "rb") as f:
+                _fertilizer_model = pickle.load(f)
+            print("✅ Fertilizer model loaded successfully")
+        except Exception as e:
+            print(f"❌ Error loading fertilizer model: {e}")
+            _fertilizer_model = None
+    return _fertilizer_model
 
 # -------------------- CLASS NAMES --------------------
 CLASS_NAMES = [
@@ -513,6 +539,7 @@ def predict():
         image = Image.open(io.BytesIO(file.read())).convert("RGB")
         if image is None:
             return jsonify({"error": "Invalid image file"}), 400
+        model = get_model()  # lazy load
         if model is None:
             return jsonify({"error": "Model not loaded"}), 500
         img = preprocess_image(image)
@@ -893,6 +920,7 @@ def predict_fertilizer():
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
+        fertilizer_model = get_fertilizer_model()  # lazy load
         if fertilizer_model is None:
             return jsonify({"error": "Fertilizer model not loaded"}), 500
         try:
