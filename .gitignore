@@ -38,7 +38,5 @@ venv/
 *.njsproj
 *.sln
 *.sw?
-*.db
-*.h5
-*.pkl
+
 
