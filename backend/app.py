@@ -511,6 +511,12 @@ def update_client_stats(client_id, is_disease):
         stats.diseases_detected += 1
     stats.last_updated = datetime.utcnow()
 
+
+@app.route("/")
+def home():
+    return "Wheat Disease API is running 🚀"
+
+
 # -------------------- PREDICTION API --------------------
 @app.route("/predict", methods=["POST"])
 def predict():
