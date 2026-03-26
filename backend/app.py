@@ -11,21 +11,21 @@ os.environ['TF_NUM_INTEROP_THREADS'] = '1'
 
 import tensorflow as tf
 
-# Limit TF thread usage to reduce RAM on single-core free tier
 tf.config.threading.set_intra_op_parallelism_threads(1)
 tf.config.threading.set_inter_op_parallelism_threads(1)
 
 import numpy as np
 from PIL import Image
 from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
 import hashlib
+import bcrypt
 from dotenv import load_dotenv
-from sqlalchemy import func
+from sqlalchemy import func, text
 from flask import send_file
-from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
 from reportlab.lib import colors
 from reportlab.platypus import Table, TableStyle
 from reportlab.lib.units import inch
@@ -36,6 +36,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pickle
 import pandas as pd
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 load_dotenv()
 
@@ -43,8 +46,14 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, origins=[
     "http://localhost:8080",
+    "http://localhost:5173",
     "https://agrilens-beta.vercel.app"
 ])
+
+# -------------------- JWT SETUP --------------------
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET', 'fallback-secret-change-this')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)
+jwt = JWTManager(app)
 
 # -------------------- DATABASE SETUP --------------------
 app.config['SQLALCHEMY_DATABASE_URI'] = (
@@ -63,6 +72,7 @@ class Client(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100))
     phone = db.Column(db.String(20))
+    pin_hash = db.Column(db.String(255), nullable=True)
 
 class DiseasePrediction(db.Model):
     __tablename__ = 'disease_predictions'
@@ -84,6 +94,13 @@ class ClientStats(db.Model):
 
 with app.app_context():
     db.create_all()
+    # Add pin_hash column if it doesn't exist
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS pin_hash VARCHAR(255)"))
+            conn.commit()
+    except Exception:
+        pass
     if not Client.query.first():
         default_client = Client(name="Default Farmer", phone="1234567890")
         db.session.add(default_client)
@@ -97,8 +114,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "trained_model_efficientnet_b0.h5")
 
 # -------------------- LAZY MODEL LOADING --------------------
-# Models are NOT loaded at startup to prevent OOM segfault on 1GB RAM instances.
-# They are loaded on first use and cached globally.
 _model = None
 _fertilizer_model = None
 
@@ -376,115 +391,34 @@ REMEDY_MAP_TE = {
     ]
 }
 
-# -------------------- FERTILIZER INFO - ENGLISH --------------------
+# -------------------- FERTILIZER INFO --------------------
 FERTILIZER_INFO_EN = {
-    'Urea': {
-        'npk': '46-0-0',
-        'description': 'High nitrogen content, excellent for vegetative growth',
-        'usage': 'Apply during early growth stages'
-    },
-    'DAP': {
-        'npk': '18-46-0',
-        'description': 'High phosphorus, promotes root development',
-        'usage': 'Apply at sowing time'
-    },
-    'TSP': {
-        'npk': '0-46-0',
-        'description': 'Triple superphosphate, concentrated phosphorus',
-        'usage': 'Apply during soil preparation'
-    },
-    '10-26-26': {
-        'npk': '10-26-26',
-        'description': 'Balanced NPK with higher P and K',
-        'usage': 'Suitable for flowering and fruiting stages'
-    },
-    '14-35-14': {
-        'npk': '14-35-14',
-        'description': 'Phosphorus-rich balanced fertilizer',
-        'usage': 'Apply during flowering stage'
-    },
-    '17-17-17': {
-        'npk': '17-17-17',
-        'description': 'Balanced NPK for all-round nutrition',
-        'usage': 'Apply throughout growth cycle'
-    },
-    '20-20': {
-        'npk': '20-20-0',
-        'description': 'Balanced N-P fertilizer',
-        'usage': 'Apply during early to mid growth'
-    },
-    '28-28': {
-        'npk': '28-28-0',
-        'description': 'High nitrogen and phosphorus',
-        'usage': 'Apply for rapid growth'
-    },
-    'Potassium chloride': {
-        'npk': '0-0-60',
-        'description': 'High potassium, enhances disease resistance',
-        'usage': 'Apply during fruiting stage'
-    },
-    'Potassium sulfate.': {
-        'npk': '0-0-50',
-        'description': 'Sulfate form of potassium, chloride-free',
-        'usage': 'Suitable for chloride-sensitive crops'
-    }
+    'Urea': {'npk': '46-0-0', 'description': 'High nitrogen content, excellent for vegetative growth', 'usage': 'Apply during early growth stages'},
+    'DAP': {'npk': '18-46-0', 'description': 'High phosphorus, promotes root development', 'usage': 'Apply at sowing time'},
+    'TSP': {'npk': '0-46-0', 'description': 'Triple superphosphate, concentrated phosphorus', 'usage': 'Apply during soil preparation'},
+    '10-26-26': {'npk': '10-26-26', 'description': 'Balanced NPK with higher P and K', 'usage': 'Suitable for flowering and fruiting stages'},
+    '14-35-14': {'npk': '14-35-14', 'description': 'Phosphorus-rich balanced fertilizer', 'usage': 'Apply during flowering stage'},
+    '17-17-17': {'npk': '17-17-17', 'description': 'Balanced NPK for all-round nutrition', 'usage': 'Apply throughout growth cycle'},
+    '20-20': {'npk': '20-20-0', 'description': 'Balanced N-P fertilizer', 'usage': 'Apply during early to mid growth'},
+    '28-28': {'npk': '28-28-0', 'description': 'High nitrogen and phosphorus', 'usage': 'Apply for rapid growth'},
+    'Potassium chloride': {'npk': '0-0-60', 'description': 'High potassium, enhances disease resistance', 'usage': 'Apply during fruiting stage'},
+    'Potassium sulfate.': {'npk': '0-0-50', 'description': 'Sulfate form of potassium, chloride-free', 'usage': 'Suitable for chloride-sensitive crops'}
 }
 
-# -------------------- FERTILIZER INFO - TELUGU --------------------
 FERTILIZER_INFO_TE = {
-    'Urea': {
-        'npk': '46-0-0',
-        'description': 'అధిక నత్రజని పరిమాణం, సస్యవృద్ధికి అద్భుతంగా పనిచేస్తుంది',
-        'usage': 'ప్రారంభ వృద్ధి దశలలో వేయండి'
-    },
-    'DAP': {
-        'npk': '18-46-0',
-        'description': 'అధిక భాస్వరం, వేరు అభివృద్ధిని ప్రోత్సహిస్తుంది',
-        'usage': 'విత్తన సమయంలో వేయండి'
-    },
-    'TSP': {
-        'npk': '0-46-0',
-        'description': 'ట్రిపుల్ సూపర్‌ఫాస్ఫేట్, కేంద్రీకృత భాస్వరం',
-        'usage': 'నేల తయారీ సమయంలో వేయండి'
-    },
-    '10-26-26': {
-        'npk': '10-26-26',
-        'description': 'అధిక P మరియు K తో సమతుల్య NPK',
-        'usage': 'పూత మరియు కాయ దశలకు అనుకూలం'
-    },
-    '14-35-14': {
-        'npk': '14-35-14',
-        'description': 'భాస్వరం అధికంగా ఉన్న సమతుల్య ఎరువు',
-        'usage': 'పూత దశలో వేయండి'
-    },
-    '17-17-17': {
-        'npk': '17-17-17',
-        'description': 'సర్వాంగీణ పోషణకు సమతుల్య NPK',
-        'usage': 'మొత్తం వృద్ధి చక్రంలో వేయండి'
-    },
-    '20-20': {
-        'npk': '20-20-0',
-        'description': 'సమతుల్య N-P ఎరువు',
-        'usage': 'ప్రారంభ నుండి మధ్య వృద్ధి సమయంలో వేయండి'
-    },
-    '28-28': {
-        'npk': '28-28-0',
-        'description': 'అధిక నత్రజని మరియు భాస్వరం',
-        'usage': 'వేగంగా వృద్ధి చెందడానికి వేయండి'
-    },
-    'Potassium chloride': {
-        'npk': '0-0-60',
-        'description': 'అధిక పొటాషియం, వ్యాధి నిరోధకతను పెంచుతుంది',
-        'usage': 'కాయ దశలో వేయండి'
-    },
-    'Potassium sulfate.': {
-        'npk': '0-0-50',
-        'description': 'పొటాషియం యొక్క సల్ఫేట్ రూపం, క్లోరైడ్-రహితం',
-        'usage': 'క్లోరైడ్-సున్నిత పంటలకు అనుకూలం'
-    }
+    'Urea': {'npk': '46-0-0', 'description': 'అధిక నత్రజని పరిమాణం, సస్యవృద్ధికి అద్భుతంగా పనిచేస్తుంది', 'usage': 'ప్రారంభ వృద్ధి దశలలో వేయండి'},
+    'DAP': {'npk': '18-46-0', 'description': 'అధిక భాస్వరం, వేరు అభివృద్ధిని ప్రోత్సహిస్తుంది', 'usage': 'విత్తన సమయంలో వేయండి'},
+    'TSP': {'npk': '0-46-0', 'description': 'ట్రిపుల్ సూపర్‌ఫాస్ఫేట్, కేంద్రీకృత భాస్వరం', 'usage': 'నేల తయారీ సమయంలో వేయండి'},
+    '10-26-26': {'npk': '10-26-26', 'description': 'అధిక P మరియు K తో సమతుల్య NPK', 'usage': 'పూత మరియు కాయ దశలకు అనుకూలం'},
+    '14-35-14': {'npk': '14-35-14', 'description': 'భాస్వరం అధికంగా ఉన్న సమతుల్య ఎరువు', 'usage': 'పూత దశలో వేయండి'},
+    '17-17-17': {'npk': '17-17-17', 'description': 'సర్వాంగీణ పోషణకు సమతుల్య NPK', 'usage': 'మొత్తం వృద్ధి చక్రంలో వేయండి'},
+    '20-20': {'npk': '20-20-0', 'description': 'సమతుల్య N-P ఎరువు', 'usage': 'ప్రారంభ నుండి మధ్య వృద్ధి సమయంలో వేయండి'},
+    '28-28': {'npk': '28-28-0', 'description': 'అధిక నత్రజని మరియు భాస్వరం', 'usage': 'వేగంగా వృద్ధి చెందడానికి వేయండి'},
+    'Potassium chloride': {'npk': '0-0-60', 'description': 'అధిక పొటాషియం, వ్యాధి నిరోధకతను పెంచుతుంది', 'usage': 'కాయ దశలో వేయండి'},
+    'Potassium sulfate.': {'npk': '0-0-50', 'description': 'పొటాషియం యొక్క సల్ఫేట్ రూపం, క్లోరైడ్-రహితం', 'usage': 'క్లోరైడ్-సున్నిత పంటలకు అనుకూలం'}
 }
 
-REMEDY_MAP = REMEDY_MAP_EN  # alias for PDF (always English)
+REMEDY_MAP = REMEDY_MAP_EN
 
 def get_remedy_map(language="en"):
     return REMEDY_MAP_TE if language == "te" else REMEDY_MAP_EN
@@ -494,7 +428,6 @@ def get_fertilizer_info(language="en"):
 
 IMG_SIZE = 224
 
-# -------------------- IMAGE PREPROCESSING --------------------
 def preprocess_image(image):
     image = image.resize((IMG_SIZE, IMG_SIZE))
     image = np.array(image)
@@ -502,7 +435,6 @@ def preprocess_image(image):
     image = np.expand_dims(image, axis=0)
     return image
 
-# -------------------- HELPER FUNCTION --------------------
 def update_client_stats(client_id, is_disease):
     client_id = int(client_id)
     stats = ClientStats.query.filter_by(client_id=client_id).first()
@@ -515,12 +447,134 @@ def update_client_stats(client_id, is_disease):
     stats.last_updated = datetime.utcnow()
 
 
+# ==================== AUTH ROUTES (converted from Node.js) ====================
+
+@app.route("/api/auth/register", methods=["POST"])
+def register():
+    try:
+        data = request.get_json()
+        name = data.get("name", "").strip()
+        phone = data.get("phone", "").strip()
+        pin = data.get("pin", "").strip()
+
+        if not name or not phone or not pin:
+            return jsonify({"message": "All fields required"}), 400
+        if len(pin) != 6:
+            return jsonify({"message": "PIN must be 6 digits"}), 400
+
+        existing = Client.query.filter_by(phone=phone).first()
+        if existing:
+            return jsonify({"message": "Phone already registered"}), 409
+
+        pin_hash = bcrypt.hashpw(pin.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+        new_client = Client(name=name, phone=phone, pin_hash=pin_hash)
+        db.session.add(new_client)
+        db.session.flush()
+
+        new_stats = ClientStats(client_id=new_client.id)
+        db.session.add(new_stats)
+        db.session.commit()
+
+        return jsonify({
+            "message": "User registered successfully",
+            "user": {"id": new_client.id, "name": new_client.name, "phone": new_client.phone}
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Register error: {e}")
+        return jsonify({"message": "Server error"}), 500
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def login():
+    try:
+        data = request.get_json()
+        phone = data.get("phone", "").strip()
+        pin = data.get("pin", "").strip()
+
+        user = Client.query.filter_by(phone=phone).first()
+        if not user:
+            return jsonify({"message": "User not found"}), 401
+
+        if not user.pin_hash:
+            return jsonify({"message": "Account has no PIN set. Please register again."}), 401
+
+        is_match = bcrypt.checkpw(pin.encode('utf-8'), user.pin_hash.encode('utf-8'))
+        if not is_match:
+            return jsonify({"message": "Invalid PIN"}), 401
+
+        token = create_access_token(identity={
+            "id": user.id,
+            "name": user.name,
+            "phone": user.phone
+        })
+
+        return jsonify({
+            "token": token,
+            "user": {"id": user.id, "name": user.name, "phone": user.phone}
+        }), 200
+
+    except Exception as e:
+        print(f"❌ Login error: {e}")
+        return jsonify({"message": "Login failed"}), 500
+
+
+@app.route("/api/dashboard", methods=["GET"])
+@jwt_required()
+def protected_dashboard():
+    current_user = get_jwt_identity()
+    return jsonify({"message": "Welcome to your dashboard", "user": current_user}), 200
+
+
+# ==================== CONTACT ROUTE (converted from Node.js) ====================
+
+@app.route("/api/contact", methods=["POST"])
+def contact():
+    try:
+        data = request.get_json()
+        name = data.get("name", "").strip()
+        email = data.get("email", "").strip()
+        message = data.get("message", "").strip()
+
+        if not name or not email or not message:
+            return jsonify({"message": "All fields are required"}), 400
+
+        mail_user = os.getenv("MAIL_USER")
+        mail_pass = os.getenv("MAIL_PASS")
+
+        msg_user = MIMEMultipart()
+        msg_user['From'] = f"AgriLens Support <{mail_user}>"
+        msg_user['To'] = email
+        msg_user['Subject'] = "AgriLens - We received your message"
+        msg_user.attach(MIMEText(f"<h3>Hello {name},</h3><p>Thank you for contacting <b>AgriLens</b>.</p><p><b>Your message:</b></p><p>{message}</p><br/><p>Our team will contact you shortly.</p><p>AgriLens Team</p>", 'html'))
+
+        msg_admin = MIMEMultipart()
+        msg_admin['From'] = f"AgriLens Contact Form <{mail_user}>"
+        msg_admin['To'] = mail_user
+        msg_admin['Subject'] = f"New Contact Form: {name}"
+        msg_admin.attach(MIMEText(f"<h3>New Contact Form Submission</h3><p><b>Name:</b> {name}</p><p><b>Email:</b> {email}</p><p><b>Message:</b> {message}</p>", 'html'))
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(mail_user, mail_pass)
+            server.send_message(msg_user)
+            server.send_message(msg_admin)
+
+        return jsonify({"message": "Email sent successfully"}), 200
+
+    except Exception as e:
+        print(f"❌ Contact error: {e}")
+        return jsonify({"message": "Failed to send email", "error": str(e)}), 500
+
+
+# ==================== EXISTING ROUTES ====================
+
 @app.route("/")
 def home():
     return "Wheat Disease API is running 🚀"
 
 
-# -------------------- PREDICTION API --------------------
 @app.route("/predict", methods=["POST"])
 def predict():
     if "file" not in request.files:
@@ -548,7 +602,7 @@ def predict():
         image = Image.open(io.BytesIO(file.read())).convert("RGB")
         if image is None:
             return jsonify({"error": "Invalid image file"}), 400
-        model = get_model()  # lazy load
+        model = get_model()
         if model is None:
             return jsonify({"error": "Model not loaded"}), 500
         img = preprocess_image(image)
@@ -564,9 +618,7 @@ def predict():
         risk_level = round((confidence / 100) * (severity / MAX_SEVERITY) * 100, 2)
         remedy_map = get_remedy_map(language)
         remedies = remedy_map.get(predicted_disease, remedy_map["Other Disease"])
-        prediction_record = DiseasePrediction(
-            client_id=client_id, disease_name=predicted_disease, confidence=confidence,
-        )
+        prediction_record = DiseasePrediction(client_id=client_id, disease_name=predicted_disease, confidence=confidence)
         db.session.add(prediction_record)
         is_disease = predicted_disease != "Healthy"
         update_client_stats(client_id, is_disease)
@@ -580,7 +632,7 @@ def predict():
         db.session.rollback()
         return jsonify({"error": f"Prediction failed: {str(e)}"}), 500
 
-# -------------------- WEEKLY DASHBOARD API --------------------
+
 @app.route("/weekly-dashboard/<int:client_id>", methods=["GET"])
 def weekly_dashboard(client_id):
     try:
@@ -596,7 +648,7 @@ def weekly_dashboard(client_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -------------------- DASHBOARD STATISTICS API --------------------
+
 @app.route("/dashboard-stats/<int:client_id>", methods=["GET"])
 def dashboard_stats(client_id):
     try:
@@ -624,7 +676,7 @@ def dashboard_stats(client_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -------------------- PDF REPORT GENERATION --------------------
+
 @app.route("/download-report/<int:client_id>", methods=["GET"])
 def download_report(client_id):
     client = Client.query.get(client_id)
@@ -723,7 +775,7 @@ def download_report(client_id):
             if disease != "Healthy":
                 pdf.setFont("Helvetica-Bold", 13)
                 pdf.setFillColor(colors.HexColor('#C62828'))
-                pdf.drawString(40, y, f"⚠ {disease} ({count} case{'s' if count > 1 else ''})")
+                pdf.drawString(40, y, f"  {disease} ({count} case{'s' if count > 1 else ''})")
                 y -= 20
                 pdf.setFillColor(colors.black)
                 pdf.setFont("Helvetica-Bold", 11)
@@ -760,7 +812,7 @@ def download_report(client_id):
     pdf.setFillColor(colors.black)
     pdf.setFont("Helvetica", 10)
     for tip in general_tips:
-        pdf.drawString(60, y, f"✓ {tip}")
+        pdf.drawString(60, y, f"  {tip}")
         y -= 18
     pdf.setFont("Helvetica-Oblique", 9)
     pdf.setFillColor(colors.grey)
@@ -775,7 +827,8 @@ def download_report(client_id):
         mimetype="application/pdf"
     )
 
-# -------------------- CHATBOT HELPERS --------------------
+
+# -------------------- CHATBOT --------------------
 conversation_history = {}
 
 def get_conversation_key(disease, remote_addr, client_id=""):
@@ -798,7 +851,7 @@ def analyze_question_intent(question):
             return intent
     return "general"
 
-# -------------------- CHATBOT API --------------------
+
 @app.route('/api/wheat-bot', methods=['POST'])
 def wheat_bot_endpoint():
     try:
@@ -808,15 +861,13 @@ def wheat_bot_endpoint():
         question = data.get('question', '').strip()
         disease = data.get('disease', '').strip()
         client_id = data.get('client_id', '')
-        language = data.get('language', 'en')   # ✅ read language
-
+        language = data.get('language', 'en')
         if not question:
             return jsonify({'error': 'Question is required'}), 400
         if not disease:
             return jsonify({'error': 'Disease name is required'}), 400
         if language not in ('en', 'te'):
             language = 'en'
-
         conv_key = get_conversation_key(disease, request.remote_addr, client_id)
         if conv_key not in conversation_history:
             conversation_history[conv_key] = {
@@ -826,37 +877,22 @@ def wheat_bot_endpoint():
             }
         history = conversation_history[conv_key]
         history['language'] = language
-
         intent = analyze_question_intent(question)
         history['question_types'].append(intent)
-
         recent_intents = history['question_types'][-3:]
         if recent_intents.count(intent) > 1:
             question = f"{question} (Please provide different aspects from previous answers)"
-
-        history['messages'].append({
-            'role': 'user', 'content': question,
-            'intent': intent, 'timestamp': datetime.now().isoformat()
-        })
-
-        # ✅ Pass language to chatbot
+        history['messages'].append({'role': 'user', 'content': question, 'intent': intent, 'timestamp': datetime.now().isoformat()})
         reply = wheat_chatbot(question, disease, language=language)
-
-        history['messages'].append({
-            'role': 'assistant', 'content': reply,
-            'timestamp': datetime.now().isoformat()
-        })
-
+        history['messages'].append({'role': 'assistant', 'content': reply, 'timestamp': datetime.now().isoformat()})
         if len(history['messages']) > 20:
             history['messages'] = history['messages'][-20:]
         if len(history['question_types']) > 10:
             history['question_types'] = history['question_types'][-10:]
         conversation_history[conv_key] = history
-
         return jsonify({
             'reply': reply, 'disease': disease, 'language': language,
-            'conversation_id': conv_key,
-            'message_count': len(history['messages']),
+            'conversation_id': conv_key, 'message_count': len(history['messages']),
             'current_intent': intent, 'success': True,
             'suggestions': get_suggestions_based_on_intent(intent, disease, language)
         })
@@ -917,19 +953,17 @@ def suggest_questions(disease):
     return jsonify(questions)
 
 
-# -------------------- FERTILIZER API --------------------
 @app.route("/predict-fertilizer", methods=["POST"])
 def predict_fertilizer():
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "No data provided"}), 400
-        required_fields = ['temperature', 'humidity', 'moisture', 'soilType',
-                           'cropType', 'nitrogen', 'potassium', 'phosphorous']
+        required_fields = ['temperature', 'humidity', 'moisture', 'soilType', 'cropType', 'nitrogen', 'potassium', 'phosphorous']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
-        fertilizer_model = get_fertilizer_model()  # lazy load
+        fertilizer_model = get_fertilizer_model()
         if fertilizer_model is None:
             return jsonify({"error": "Fertilizer model not loaded"}), 500
         try:
@@ -945,43 +979,33 @@ def predict_fertilizer():
             return jsonify({"error": "Humidity must be between 0 and 100"}), 400
         if not (0 <= moisture <= 100):
             return jsonify({"error": "Moisture must be between 0 and 100"}), 400
-
         soil_type = data['soilType']
         crop_type = data['cropType']
-        language = data.get('language', 'en')   # ✅ read language
+        language = data.get('language', 'en')
         if language not in ('en', 'te'):
             language = 'en'
-
         input_data = pd.DataFrame({
             'Temperature': [temperature], 'Humidity': [humidity], 'Moisture': [moisture],
             'Nitrogen': [nitrogen], 'Phosphorous': [phosphorous], 'Potassium': [potassium],
             'Soil_Type': [soil_type], 'Crop_Type': [crop_type]
         })
-
         prediction = fertilizer_model.predict(input_data)
         predicted_fertilizer = prediction[0]
-
         try:
             probabilities = fertilizer_model.predict_proba(input_data)
             confidence = float(max(probabilities[0])) * 100
         except:
             confidence = 95.0
-
-        # ✅ Pick fertilizer info in the correct language
         fertilizer_info = get_fertilizer_info(language)
         fertilizer_details = fertilizer_info.get(predicted_fertilizer, {
             'npk': 'Contact agronomist',
             'description': 'నిపుణులను సంప్రదించండి' if language == 'te' else 'Specialized fertilizer',
             'usage': 'నిపుణుల సిఫార్సులు పాటించండి' if language == 'te' else 'Follow expert recommendations'
         })
-
         return jsonify({
-            "success": True,
-            "fertilizer": predicted_fertilizer,
-            "confidence": round(confidence, 2),
-            "npk_ratio": fertilizer_details['npk'],
-            "description": fertilizer_details['description'],
-            "usage_instructions": fertilizer_details['usage'],
+            "success": True, "fertilizer": predicted_fertilizer,
+            "confidence": round(confidence, 2), "npk_ratio": fertilizer_details['npk'],
+            "description": fertilizer_details['description'], "usage_instructions": fertilizer_details['usage'],
             "input_parameters": {
                 "temperature": temperature, "humidity": humidity, "moisture": moisture,
                 "nitrogen": nitrogen, "phosphorous": phosphorous, "potassium": potassium,
