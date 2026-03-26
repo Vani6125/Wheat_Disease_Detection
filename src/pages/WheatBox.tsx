@@ -219,6 +219,7 @@ const TRANSLATIONS = {
 };
 
 const CATEGORY_KEYS = ["symptoms", "treatment", "prevention", "impact", "causes"];
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 const WheatBot = () => {
   const [language, setLanguage] = useState("en");
@@ -287,7 +288,7 @@ const WheatBot = () => {
         conversation_id: conversationId || undefined,
         language: language
       };
-      const res = await fetch("http://127.0.0.1:5000/api/wheat-bot", {
+      const res = await fetch(`${BASE_URL}/api/wheat-bot`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });

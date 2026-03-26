@@ -77,7 +77,7 @@ const TRANSLATIONS = {
     cases: "కేసులు",
   }
 };
-
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 // Language Toggle Component
 const LanguageToggle = ({ language, setLanguage }) => (
   <div style={{
@@ -125,7 +125,7 @@ const Dashboard = () => {
         if (!user || !user.id) { setError(t.loginError); setLoading(false); return; }
         const clientId = user.id;
 
-        const weeklyResponse = await fetch(`http://127.0.0.1:5000/weekly-dashboard/${clientId}`);
+        const weeklyResponse = await fetch(`${BASE_URL}/weekly-dashboard/${clientId}`);
         if (!weeklyResponse.ok) throw new Error(`HTTP error! status: ${weeklyResponse.status}`);
         const weeklyDataJson = await weeklyResponse.json();
         if (weeklyDataJson.error) throw new Error(weeklyDataJson.error);
@@ -135,7 +135,7 @@ const Dashboard = () => {
         }));
         setWeeklyData(formattedWeekly);
 
-        const statsResponse = await fetch(`http://127.0.0.1:5000/dashboard-stats/${clientId}`);
+        const statsResponse = await fetch(`${BASE_URL}/dashboard-stats/${clientId}`);
         if (!statsResponse.ok) throw new Error(`HTTP error! status: ${statsResponse.status}`);
         const statsData = await statsResponse.json();
         if (statsData.error) throw new Error(statsData.error);

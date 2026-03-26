@@ -312,7 +312,7 @@ const Model = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<DetectionResult | null>(null);
   const [showCamera, setShowCamera] = useState(false);
-
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
   const t = TRANSLATIONS[language];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -358,7 +358,7 @@ const Model = () => {
       formData.append("client_id", user.id.toString());
       formData.append("language", language);
 
-      const res = await fetch("http://127.0.0.1:5000/predict", {
+      const res = await fetch(`${BASE_URL}/predict`, {
         method: "POST",
         body: formData,
       });

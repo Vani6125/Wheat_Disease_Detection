@@ -60,6 +60,7 @@ const TRANSLATIONS = {
   }
 };
 
+
 // Language Toggle Component
 const LanguageToggle = ({ language, setLanguage }) => (
   <div style={{

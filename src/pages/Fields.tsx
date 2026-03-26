@@ -168,7 +168,7 @@ const FertilizerRecommendation = () => {
   const [weatherFetched, setWeatherFetched] = useState(false);
 
   const API_KEY = import.meta.env.VITE_WEATHER_API_KEY;
-  const BACKEND_URL = "http://127.0.0.1:5000";
+  const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
   const soilTypes = ["Black", "Red", "Clayey", "Loamy", "Sandy"];
   const cropTypes = ["Wheat", "Barley", "Maize", "Cotton", "Sugarcane", "Ground Nuts", "Pulses", "Paddy", "rice"];
@@ -255,7 +255,7 @@ const FertilizerRecommendation = () => {
     if (!validateForm()) return;
     setLoading(true); setError(null); setRecommendation(null);
     try {
-      const response = await fetch(`${BACKEND_URL}/predict-fertilizer`, {
+      const response = await fetch(`${BASE_URL}/predict-fertilizer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
