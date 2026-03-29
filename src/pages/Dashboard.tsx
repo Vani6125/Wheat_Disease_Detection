@@ -162,7 +162,7 @@ const Dashboard = () => {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
       const clientId = user?.id;
       if (!clientId) { alert(t.downloadLoginAlert); return; }
-      window.open(`http://127.0.0.1:5000/download-report/${clientId}`, "_blank");
+      window.open(`${BASE_URL}/download-report/${clientId}`, "_blank");
       setTimeout(() => setDownloading(false), 2000);
     } catch {
       alert(t.downloadFailed);
